@@ -33,12 +33,16 @@
       set_fact:
         host_ip: >-
           {% if host_file_check.rc == 0 %}
-          {% set ip_match = host_file_check.stdout | regex_search('^(\\d+\\.\\d+\\.\\d+\\.\\d+)\\s+') %}
-          {{ ip_match[0] if ip_match else 'None' }}
+          {{ host_file_check.stdout.split()[0] }}
           {% else %}
           None
           {% endif %}
         domain_found: "{{ host_file_check.rc == 0 }}"
+      when: config_type == "Host file"
+
+    - name: Debug host_ip
+      debug:
+        msg: "host_ip: '{{ host_ip }}', domain_found: '{{ domain_found }}'"
       when: config_type == "Host file"
   when: config_type == "Host file"
 
