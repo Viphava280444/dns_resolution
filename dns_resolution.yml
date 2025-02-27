@@ -1,0 +1,125 @@
+- name: Set domain variables
+  set_fact:
+    current_domain: "{{ domain_entry.Domain_name | trim }}"
+    expected_ip: "{{ domain_entry.IP_Mapping }}"
+    config_type: "{{ domain_entry.Configuration }}"
+    result: {}
+
+- name: Initialize result for current domain
+  set_fact:
+    result:
+      Host: "{{ domain_entry.Host }}"
+      Service: "{{ domain_entry.Service }}"
+      IP_Mapping: "{{ expected_ip }}"
+      Domain_name: "{{ current_domain }}"
+      Configuration: "{{ config_type }}"
+      Description: "{{ domain_entry.Description | default('') }}"
+
+- name: Check if domain is in /etc/hosts
+  command: grep "{{ domain_entry.Domain_name }}" /etc/hosts
+  register: host_file_check
+  ignore_errors: yes
+  changed_when: false
+  when: config_type == "Host file"
+
+- name: Debug host file check
+  debug:
+    msg: "host_file_check: rc={{ host_file_check.rc }}, stdout='{{ host_file_check.stdout }}'"
+  when: config_type == "Host file"
+
+- name: Process host file result
+  block:
+    - name: Extract host file IP and check domain
+      set_fact:
+        host_ip: >-
+          {% if host_file_check.rc == 0 %}
+          {% set ip_match = host_file_check.stdout | regex_search('^(\\d+\\.\\d+\\.\\d+\\.\\d+)\\s+') %}
+          {{ ip_match[0] if ip_match else 'None' }}
+          {% else %}
+          None
+          {% endif %}
+        domain_found: "{{ host_file_check.rc == 0 }}"
+      when: config_type == "Host file"
+  when: config_type == "Host file"
+
+- name: Update result for host file
+  set_fact:
+    result: "{{ result | combine({
+      'Host_Result': 'TRUE' if domain_found else 'FALSE',
+      'Nameserver_Configured': 'None',
+      'Resolve_IP': host_ip if domain_found else 'None',
+      'Resolve_Status': 'TRUE' if domain_found else 'FALSE',
+      'IP_MATCHED': 'TRUE' if (domain_found and host_ip == domain_entry.IP_Mapping) else 'FALSE' if domain_found else 'None',
+      'Log_returned': host_file_check.stdout if domain_found else ''}) }}"
+  when: config_type == "Host file"
+
+- name: Debug nameservers
+  debug:
+    msg: "Nameservers being checked: {{ nameservers }}"
+  when: config_type == "Nameserver"
+
+- name: Check nameserver configuration
+  command: grep "nameserver {{ item }}" /etc/resolv.conf
+  register: resolv_conf_check
+  ignore_errors: yes
+  changed_when: false
+  loop: "{{ nameservers }}"
+  when: config_type == "Nameserver"
+
+- name: Debug grep result
+  debug:
+    msg: "grep result for {{ item }}: rc={{ resolv_conf_check.results | selectattr('item', 'equalto', item) | map(attribute='rc') | first }}, stdout={{ resolv_conf_check.results | selectattr('item', 'equalto', item) | map(attribute='stdout') | first | default('') }}, stderr={{ resolv_conf_check.results | selectattr('item', 'equalto', item) | map(attribute='stderr') | first | default('') }}"
+  loop: "{{ nameservers }}"
+  when: config_type == "Nameserver" and resolv_conf_check.results is defined
+  loop_control:
+    label: "{{ item }}"
+
+- name: Debug Nameserver_Configured calculation
+  debug:
+    msg: "Nameserver_Configured calc: {{ (resolv_conf_check.results | map(attribute='rc') | list | min == 0) | string | upper }}"
+  when: config_type == "Nameserver" and resolv_conf_check.results is defined
+
+- name: Perform DNS lookup
+  command: nslookup {{ current_domain }} {{ item }}
+  register: nslookup_result
+  ignore_errors: yes
+  changed_when: false
+  loop: "{{ nameservers }}"
+  when: config_type == "Nameserver" and (resolv_conf_check.results | selectattr('item', 'equalto', item) | map(attribute='rc') | first) == 0
+
+- name: Process nameserver result
+  block:
+    - name: Extract raw DNS info
+      set_fact:
+        raw_ip: >-
+          {% set match = nslookup_result.results[0].stdout | regex_search('Address:\\s*(\\d+\\.\\d+\\.\\d+\\.\\d+)(?!#53)', '\\1') %}
+          {% if match %}{{ match[0] }}{% else %}None{% endif %}
+        resolve_status: >-
+          {% if nslookup_result.results[0].rc == 0 and "Address:" in nslookup_result.results[0].stdout %}TRUE
+          {% else %}FALSE{% endif %}
+      when: nslookup_result.results is defined and nslookup_result.results[0].rc is defined
+
+    - name: Trim resolved IP
+      set_fact:
+        resolved_ip: "{{ raw_ip | trim }}"
+      when: config_type == "Nameserver" and raw_ip is defined
+
+    - name: Debug match and resolved_ip
+      debug:
+        msg: "match: '{{ match }}', match[0]: '{{ match[0] }}', raw_ip: '{{ raw_ip }}', resolved_ip: '{{ resolved_ip }}' (length: {{ resolved_ip | length }}), expected_ip: '{{ expected_ip }}' (length: {{ expected_ip | length }})"
+      when: config_type == "Nameserver" and nslookup_result.results is defined and match is defined
+
+    - name: Update result for nameserver
+      set_fact:
+        result: "{{ result | combine({
+          'Host_Result': 'None',
+          'Nameserver_Configured': (resolv_conf_check.results | map(attribute='rc') | list | min == 0) | string | upper,
+          'Resolve_IP': resolved_ip if resolved_ip is defined else 'None',
+          'Resolve_Status': resolve_status | default('FALSE') | upper,
+          'IP_MATCHED': (resolved_ip == expected_ip) | string | upper if resolved_ip is defined and resolved_ip != 'None' else 'None',
+          'Log_returned': nslookup_result.results[0].stdout | default('')}) }}"
+      when: config_type == "Nameserver"
+
+- name: Add result to test_results
+  set_fact:
+    test_results: "{{ test_results + [result] }}"

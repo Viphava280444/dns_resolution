@@ -1,0 +1,189 @@
+
+---
+# Start testing for each domain
+- name: Set domain variables
+  set_fact:
+    # Only append suffix if domain doesn't already have a TLD, trim whitespace
+    current_domain: >-
+      {% if domain_entry.Domain_name is match('.*\.(com|net|org|info)$') %}
+        {{ domain_entry.Domain_name | trim }}
+      {% else %}
+        {{ domain_entry.Domain_name | trim }}{{ domain_suffix }}
+      {% endif %}
+    expected_ip: "{{ domain_entry.Map_ip }}"
+    config_type: "{{ domain_entry.Configuration }}"
+    nameserver: "{{ domain_entry.Nameserver_IP }}"
+    result: {}
+
+- name: Initialize result for current domain
+  set_fact:
+    result:
+      domain: "{{ current_domain }}"
+      expected_ip: "{{ expected_ip }}"
+      config_type: "{{ config_type }}"
+      status: "TESTING"
+
+# Check if domain is mapped in host file
+- name: Check if domain is in /etc/hosts
+  command: grep -E "^[0-9].*{{ domain_entry.Domain_name | regex_escape() }}(\s|$)" /etc/hosts
+  register: host_file_check
+  ignore_errors: yes
+  changed_when: false
+  when: config_type == "Host file"
+
+- name: Process host file result
+  block:
+    - name: Check if host entry matches expected IP
+      set_fact:
+        host_ip: "{{ host_file_check.stdout.split()[0] }}"
+      when: host_file_check.rc == 0
+
+    - name: Compare host file IP with expected IP
+      set_fact:
+        result:
+          domain: "{{ current_domain }}"
+          expected_ip: "{{ expected_ip }}"
+          actual_ip: "{{ host_ip if host_file_check.rc == 0 else 'NOT FOUND' }}"
+          config_type: "{{ config_type }}"
+          status: "{{ 'FOUND' if host_file_check.rc == 0 and host_ip == expected_ip else 'NOT FOUND' if host_file_check.rc != 0 else 'IP MISMATCH' }}"
+      when: config_type == "Host file"
+  when: config_type == "Host file"
+
+# Check nameserver configuration
+- name: Check if nameserver is in /etc/resolv.conf
+  command: grep "nameserver {{ nameserver | regex_escape() }}" /etc/resolv.conf
+  register: resolv_conf_check
+  ignore_errors: yes
+  changed_when: false
+  when: config_type == "Nameserver"
+
+- name: Perform DNS lookup with specific nameserver
+  command: nslookup {{ current_domain }} {{ nameserver }}
+  register: nslookup_result
+  ignore_errors: yes
+  changed_when: false
+  when: config_type == "Nameserver" and resolv_conf_check.rc == 0
+
+- name: Extract DNS resolution status
+  set_fact:
+    dns_status: >-
+      {% if "NXDOMAIN" in nslookup_result.stdout %}NXDOMAIN
+      {% elif "SERVFAIL" in nslookup_result.stdout or "server failed" in nslookup_result.stdout %}SERVFAIL
+      {% elif "connection timed out" in nslookup_result.stdout %}TIMEOUT
+      {% elif "REFUSED" in nslookup_result.stdout %}REFUSED
+      {% elif "Address:" in nslookup_result.stdout %}NOERROR
+      {% else %}UNKNOWN
+      {% endif %}
+  when: config_type == "Nameserver" and resolv_conf_check.rc == 0 and nslookup_result is defined
+
+- name: Extract resolved IP address
+  set_fact:
+    resolved_ip: "{{ nslookup_result.stdout | regex_search('Address: (\\d+\\.\\d+\\.\\d+\\.\\d+)', '\\1') | first | default('NONE') }}"
+  when: config_type == "Nameserver" and dns_status is defined and dns_status == "NOERROR"
+
+- name: Process nameserver resolution result
+  set_fact:
+    result:
+      domain: "{{ current_domain }}"
+      expected_ip: "{{ expected_ip }}"
+      actual_ip: "{{ resolved_ip | default('NONE') }}"
+      nameserver: "{{ nameserver }}"
+      config_type: "{{ config_type }}"
+      status: >-
+        {% if resolv_conf_check.rc != 0 %}
+          ""
+        {% elif dns_status == "NOERROR" and resolved_ip is defined %}
+          {% if resolved_ip == expected_ip %}MATCHED ({{ resolved_ip }})
+          {% else %}MISMATCH ({{ resolved_ip }})
+          {% endif %}
+        {% else %}
+          {{ dns_status }}
+        {% endif %}
+      resolv_conf: "{{ 'CONFIGURED' if resolv_conf_check.rc == 0 else 'NOT CONFIGURED' }}"
+  when: config_type == "Nameserver"
+
+- name: Ping nameserver if timeout occurs
+  command: ping -c 1 {{ nameserver }}
+  register: ping_result
+  ignore_errors: yes
+  changed_when: false
+  when: config_type == "Nameserver" and dns_status is defined and dns_status == "TIMEOUT"
+
+- name: Update timeout result with ping info
+  set_fact:
+    result: "{{ result | combine({'ping': ping_result.rc}) }}"
+  when: config_type == "Nameserver" and dns_status is defined and dns_status == "TIMEOUT" and ping_result is defined
+
+- name: Add result to test_results
+  set_fact:
+    test_results: "{{ test_results + [result] }}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---
+- name: DNS Resolution Readiness Testing
+  hosts: localhost
+  gather_facts: no
+  vars:
+    csv_file: "sample_dns_data1.csv"
+    domain_suffix: ""
+    test_results: []
+
+  tasks:
+    - name: Read CSV file with proper headers
+      community.general.read_csv:
+        path: "{{ csv_file }}"
+        delimiter: ","
+        fieldnames:
+          - Host
+          - Service
+          - Map_ip
+          - Domain_name
+          - Configuration
+          - Nameserver_IP
+          - Description
+      register: csv_data
+
+    - name: Process each domain entry
+      include_tasks: dns_resolution.yml
+      loop: "{{ csv_data.list }}"
+      loop_control:
+        loop_var: domain_entry
+      when: domain_entry.Domain_name is defined and domain_entry.Domain_name != "" and domain_entry.Domain_name != "Domain anme" and domain_entry.Configuration in ["Host file", "Nameserver"]
+
+    - name: Display test results summary
+      debug:
+        msg: "{{ test_results }}"
+
+    - name: Write test results to CSV
+      ansible.builtin.template:
+        src: templates/test_results_csv.j2
+        dest: "test_results.csv"
+        mode: '0644'
+      vars:
+        results: "{{ test_results }}"
+
+
+
+"Domain","Expected_IP","Actual_IP","Config_Type","Nameserver","Resolv_Conf","Status"
+{% for result in results %}
+"{{ result.domain }}","{{ result.expected_ip }}","{{ result.actual_ip }}","{{ result.config_type }}","{{ result.nameserver | default('') }}","{{ result.resolv_conf | default('') }}","{{ result.status }}"
+{% endfor %}
+
+
+
+

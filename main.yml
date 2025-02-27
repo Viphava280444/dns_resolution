@@ -1,0 +1,68 @@
+---
+- name: DNS Resolution Readiness Testing
+  hosts: localhost
+  gather_facts: no
+  vars:
+    csv_file: "sample_dns_data2.csv"
+    csv_output_file: "test_results2.csv"
+    test_results: []
+
+  tasks:
+    - name: Read entire CSV file as lines
+      ansible.builtin.slurp:
+        src: "{{ csv_file }}"
+      register: csv_content
+
+    - name: Parse CSV lines
+      set_fact:
+        csv_lines: "{{ csv_content.content | b64decode | split('\n') | reject('equalto', '') | list }}"
+
+    - name: Extract domain suffix
+      set_fact:
+        domain_suffix: "{{ csv_lines[0].split(',')[1] }}"
+      when: csv_lines[0].startswith('Domain:')
+
+    - name: Extract nameservers
+      set_fact:
+        # Remove quotes and split on comma+space
+        nameservers: "{{ csv_lines[1].split(',')[1] | replace('\"', '') | split(', ') }}"
+      when: csv_lines[1].startswith('Nameserver')
+
+    - name: Convert remaining lines to CSV data
+      set_fact:
+        csv_data: "{{ csv_lines[3:] | map('split', ',') | list }}"
+      when: csv_lines[2].startswith('Host')
+
+    - name: Process each domain entry
+      include_tasks: dns_resolution.yml
+      loop: "{{ csv_data }}"
+      loop_control:
+        loop_var: domain_entry_raw
+      vars:
+        domain_entry: >-
+          {{
+            {
+              'Host': domain_entry_raw[0],
+              'Service': domain_entry_raw[1],
+              'IP_Mapping': domain_entry_raw[2],
+              'Domain_name': domain_entry_raw[3],
+              'Configuration': domain_entry_raw[4],
+              'Description': domain_entry_raw[5] if domain_entry_raw | length > 5 else ''
+            }
+          }}
+      when: domain_entry.Domain_name is defined and domain_entry.Domain_name != "" and domain_entry.Configuration in ["Host file", "Nameserver"]
+
+    - name: Display test results summary
+      debug:
+        msg: "{{ test_results }}"
+
+    - name: Write test results to CSV
+      ansible.builtin.template:
+        src: templates/test_results_csv.j2
+        dest: "{{ csv_output_file }}"
+        mode: '0644'
+      vars:
+        results: "{{ test_results }}"
+        header_info:
+          domain_suffix: "{{ domain_suffix }}"
+          nameservers: "{{ nameservers | join(', ') }}"

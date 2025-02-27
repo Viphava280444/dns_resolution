@@ -1,0 +1,6 @@
+Domain:,{{ header_info.domain_suffix }},,,,,,,,,,
+Nameserver,"{{ header_info.nameservers }}",,,,,,,,,,
+Host,Service,IP Mapping,Domain name,Configuration,Description,Host Result,Nameserver Configured,Resolve IP,Resolve Status,IP MATCHED,Log returned
+{% for result in results %}
+"{{ result.Host }}","{{ result.Service }}","{{ result.IP_Mapping }}","{{ result.Domain_name }}","{{ result.Configuration }}","{{ result.Description }}","{{ result.Host_Result }}","{{ result.Nameserver_Configured }}","{{ result.Resolve_IP }}","{{ result.Resolve_Status }}","{{ result.IP_MATCHED }}","{{ result.Log_returned }}"
+{% endfor %}
