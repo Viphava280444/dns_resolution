@@ -3,8 +3,8 @@
   hosts: localhost
   gather_facts: no
   vars:
-    csv_file: "sample_dns_data2.csv"
-    csv_output_file: "test_results2.csv"
+    csv_file: "sample_dns_data3.csv"
+    csv_output_file: "test_results3.csv"
     test_results: []
 
   tasks:
