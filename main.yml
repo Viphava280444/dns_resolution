@@ -3,14 +3,13 @@
   hosts: "{{ target_hosts | default('all') }}"
   become: yes
   vars:
-    dns_results_dir: "/tmp/dns_results"
     csv_input_file: "sample_dns_data2.csv"
-    csv_output_file_name: "test_results2.csv"
     local_results_dir: "./results"
     test_results: []
+    nameservers: []
 
   pre_tasks:
-    # Create local results directory first (without sudo)
+    # Create local results directory (without sudo)
     - name: Ensure local results directory exists
       delegate_to: localhost
       become: no
@@ -20,88 +19,105 @@
         mode: '0755'
       run_once: true
 
-    # Create output directory on target hosts
-    - name: Ensure output directory exists on target
-      file:
-        path: "{{ dns_results_dir }}"
-        state: directory
-        mode: '0755'
-      
-    # Copy required files to target hosts
-    - name: Copy CSV data file to target hosts
-      copy:
+    # Read CSV file locally
+    - name: Read CSV file contents
+      delegate_to: localhost
+      become: no
+      slurp:
         src: "{{ csv_input_file }}"
-        dest: "{{ dns_results_dir }}/{{ csv_input_file | basename }}"
-        mode: '0644'
-      
-    - name: Copy templates directory
-      copy:
-        src: templates/
-        dest: "{{ dns_results_dir }}/templates/"
-        mode: '0644'
-        
-  tasks:
-    - name: Read entire CSV file as lines
-      ansible.builtin.slurp:
-        src: "{{ dns_results_dir }}/{{ csv_input_file | basename }}"
       register: csv_content
+      run_once: true
 
+    # Process CSV data locally
     - name: Parse CSV lines
+      delegate_to: localhost
+      become: no
       set_fact:
         csv_lines: "{{ csv_content.content | b64decode | split('\n') | reject('equalto', '') | list }}"
+      run_once: true
 
     - name: Extract domain suffix
+      delegate_to: localhost
+      become: no
       set_fact:
         domain_suffix: "{{ csv_lines[0].split(',')[1] }}"
       when: csv_lines[0].startswith('Domain:')
+      run_once: true
 
     - name: Extract nameservers
+      delegate_to: localhost
+      become: no
       set_fact:
-        # Remove quotes and split on comma+space
         nameservers: "{{ csv_lines[1].split(',')[1] | replace('\"', '') | split(', ') }}"
       when: csv_lines[1].startswith('Nameserver')
+      run_once: true
 
     - name: Convert remaining lines to CSV data
+      delegate_to: localhost
+      become: no
       set_fact:
         csv_data: "{{ csv_lines[3:] | map('split', ',') | list }}"
       when: csv_lines[2].startswith('Host')
+      run_once: true
+      
+  tasks:
+    # Process each domain entry - executed per host
+    - name: Setup domain fact
+      set_fact:
+        host_test_results: []
 
-    - name: Process each domain entry
-      include_tasks: dns_resolution.yml
+    - name: Process each domain entry for host files
+      include_tasks: check_host_file.yml
       loop: "{{ csv_data }}"
       loop_control:
-        loop_var: domain_entry_raw
+        loop_var: domain_raw
       vars:
-        domain_entry: >-
-          {{
-            {
-              'Host': domain_entry_raw[0],
-              'Service': domain_entry_raw[1],
-              'IP_Mapping': domain_entry_raw[2],
-              'Domain_name': domain_entry_raw[3],
-              'Configuration': domain_entry_raw[4],
-              'Description': domain_entry_raw[5] if domain_entry_raw | length > 5 else ''
-            }
-          }}
-      when: domain_entry.Domain_name is defined and domain_entry.Domain_name != "" and domain_entry.Configuration in ["Host file", "Nameserver"]
+        domain:
+          Host: "{{ domain_raw[0] }}"
+          Service: "{{ domain_raw[1] }}"
+          IP_Mapping: "{{ domain_raw[2] }}"
+          Domain_name: "{{ domain_raw[3] }}"
+          Configuration: "{{ domain_raw[4] }}"
+          Description: "{{ domain_raw[5] if domain_raw | length > 5 else '' }}"
+      when: domain_raw[4] == "Host file"
+      
+    - name: Process each domain entry for nameservers
+      include_tasks: check_nameserver.yml
+      loop: "{{ csv_data }}"
+      loop_control:
+        loop_var: domain_raw
+      vars:
+        domain:
+          Host: "{{ domain_raw[0] }}"
+          Service: "{{ domain_raw[1] }}"
+          IP_Mapping: "{{ domain_raw[2] }}"
+          Domain_name: "{{ domain_raw[3] }}"
+          Configuration: "{{ domain_raw[4] }}"
+          Description: "{{ domain_raw[5] if domain_raw | length > 5 else '' }}"
+      when: domain_raw[4] == "Nameserver"
 
-    - name: Display test results summary
-      debug:
-        msg: "{{ test_results }}"
-
-    - name: Write test results to CSV on target
-      ansible.builtin.template:
-        src: "templates/test_results_csv.j2"  # Changed: Use local path
-        dest: "{{ dns_results_dir }}/{{ inventory_hostname }}_{{ csv_output_file_name }}"
+    # Get results from each host
+    - name: Add host results to main results
+      set_fact:
+        test_results: "{{ host_test_results }}"
+    
+    - name: Copy results to controller
+      delegate_to: localhost
+      become: no
+      set_fact:
+        all_results: "{{ (all_results | default({})) | combine({inventory_hostname: test_results}) }}"
+      run_once: false
+      
+    # Generate CSV results locally
+    - name: Write test results to CSV on controller
+      delegate_to: localhost
+      become: no
+      template:
+        src: "templates/test_results_csv.j2"
+        dest: "{{ local_results_dir }}/{{ inventory_hostname }}_test_results.csv"
         mode: '0644'
       vars:
         results: "{{ test_results }}"
         header_info:
           domain_suffix: "{{ domain_suffix }}"
           nameservers: "{{ nameservers | join(', ') }}"
-          
-    - name: Fetch results back to control node
-      fetch:
-        src: "{{ dns_results_dir }}/{{ inventory_hostname }}_{{ csv_output_file_name }}"
-        dest: "{{ local_results_dir }}/"
-        flat: yes

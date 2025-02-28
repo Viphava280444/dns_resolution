@@ -3,15 +3,15 @@
 testing_vms:
   hosts:
     vm1:
-      ansible_host: xxxxx
-      ansible_user: xxxxx
-      ansible_password: xxxxx
+      ansible_host: 20.189.77.92
+      ansible_user: viphava1
+      ansible_password: Viphava1234567890
       ansible_become: yes
       
     vm2:
-      ansible_host: xxxxx
-      ansible_user: xxxxx
-      ansible_password: xxxxx
+      ansible_host: 20.189.124.102
+      ansible_user: viphava2
+      ansible_password: Viphava1234567890
       ansible_become: yes
 
 # Variables that apply to all hosts

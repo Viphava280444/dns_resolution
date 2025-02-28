@@ -1,0 +1,109 @@
+---
+# Check nameserver configuration
+- name: Check nameserver configuration
+  command: grep "nameserver {{ item }}" /etc/resolv.conf
+  register: resolv_conf_check
+  ignore_errors: yes
+  changed_when: false
+  loop: "{{ nameservers }}"
+
+- name: Calculate nameserver configured status
+  set_fact:
+    nameserver_configured: "{{ (resolv_conf_check.results | map(attribute='rc') | list | min == 0) | string }}"
+
+- name: Debug nameserver configured status
+  debug:
+    msg: "Nameserver configured: {{ nameserver_configured }}"
+
+# Block for when nameserver is properly configured
+- block:
+    - name: Get first configured nameserver
+      set_fact:
+        first_nameserver: "{{ resolv_conf_check.results | selectattr('rc', 'eq', 0) | map(attribute='item') | first }}"
+
+    - name: Debug first nameserver
+      debug:
+        msg: "First configured nameserver: {{ first_nameserver }}"
+
+    - name: Perform DNS lookup on first configured nameserver
+      command: "nslookup {{ domain.Domain_name }} {{ first_nameserver }}"
+      register: nslookup_result
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Extract DNS lookup results
+      set_fact:
+        nslookup_stdout: "{{ nslookup_result.stdout | default('') }}"
+        resolve_status: "{{ 'TRUE' if nslookup_result.rc == 0 and 'Non-authoritative answer:' in nslookup_result.stdout else 'FALSE' }}"
+
+    - name: Extract IP from lookup result
+      set_fact:
+        resolve_ip: >-
+          {% if 'Non-authoritative answer:' in nslookup_stdout and 'Address:' in nslookup_stdout %}
+            {% set match = nslookup_stdout | regex_search('Name:.*\\n.*Address: (\\d+\\.\\d+\\.\\d+\\.\\d+)', '\\1') %}
+            {% if match %}{{ match[0] | trim }}{% else %}None{% endif %}
+          {% else %}
+            None
+          {% endif %}
+
+    - name: Debug resolved IP
+      debug:
+        msg: "Resolved IP: {{ resolve_ip | default('None') }}"
+
+    - name: Debug IP comparison
+      debug:
+        msg: 
+          - "Resolved IP: '{{ resolve_ip | default('None') }}' (length: {{ resolve_ip | default('') | length }})"
+          - "Expected IP: '{{ domain.IP_Mapping }}' (length: {{ domain.IP_Mapping | length }})"
+          - "Match result: {{ (resolve_ip | trim == domain.IP_Mapping | trim) }}"
+        verbosity: 1
+
+    # Add result for configured nameserver
+    - name: Add nameserver result to results (nameserver configured)
+      set_fact:
+        host_test_results: >-
+          {{ 
+            host_test_results + [
+              {
+                'Host': domain.Host,
+                'Service': domain.Service,
+                'IP_Mapping': domain.IP_Mapping,
+                'Domain_name': domain.Domain_name,
+                'Configuration': domain.Configuration,
+                'Description': domain.Description,
+                'Host_Result': 'None',
+                'Nameserver_Configured': nameserver_configured | upper,
+                'Resolve_IP': resolve_ip | default('None'),
+                'Resolve_Status': resolve_status | default('FALSE'),
+                'IP_MATCHED': (resolve_ip | trim == domain.IP_Mapping | trim) | string | upper if resolve_ip is defined and resolve_ip | trim != 'None' else 'None',
+                'Log_returned': nslookup_stdout | default('')
+              }
+            ] 
+          }}
+  when: nameserver_configured | lower == "true"
+
+# Block for when nameserver is not configured
+- block:
+    # Add result for unconfigured nameserver
+    - name: Add nameserver result to results (nameserver not configured)
+      set_fact:
+        host_test_results: >-
+          {{ 
+            host_test_results + [
+              {
+                'Host': domain.Host,
+                'Service': domain.Service,
+                'IP_Mapping': domain.IP_Mapping,
+                'Domain_name': domain.Domain_name,
+                'Configuration': domain.Configuration,
+                'Description': domain.Description,
+                'Host_Result': 'None',
+                'Nameserver_Configured': nameserver_configured | upper,
+                'Resolve_IP': 'None',
+                'Resolve_Status': 'FALSE',
+                'IP_MATCHED': 'None',
+                'Log_returned': 'Nameserver not configured'
+              }
+            ] 
+          }}
+  when: nameserver_configured | lower == "false"

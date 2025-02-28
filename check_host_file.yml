@@ -1,0 +1,39 @@
+---
+# Check if domain is in /etc/hosts
+- name: Check if domain is in /etc/hosts
+  command: grep "{{ domain.Domain_name }}" /etc/hosts
+  register: host_file_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Extract host file IP and check domain
+  set_fact:
+    host_ip: >-
+      {% if host_file_check.rc == 0 %}
+      {{ host_file_check.stdout.split()[0] | trim }}
+      {% else %}
+      None
+      {% endif %}
+    domain_found: "{{ host_file_check.rc == 0 }}"
+
+- name: Add host file result to results
+  set_fact:
+    host_test_results: >-
+      {{ 
+        host_test_results + [
+          {
+            'Host': domain.Host,
+            'Service': domain.Service,
+            'IP_Mapping': domain.IP_Mapping,
+            'Domain_name': domain.Domain_name,
+            'Configuration': domain.Configuration,
+            'Description': domain.Description,
+            'Host_Result': 'TRUE' if domain_found else 'FALSE',
+            'Nameserver_Configured': 'None',
+            'Resolve_IP': host_ip if domain_found else 'None',
+            'Resolve_Status': 'TRUE' if domain_found else 'FALSE',
+            'IP_MATCHED': 'TRUE' if (domain_found and host_ip | trim == domain.IP_Mapping | trim) else 'FALSE' if domain_found else 'None',
+            'Log_returned': host_file_check.stdout if domain_found else ''
+          }
+        ] 
+      }}
