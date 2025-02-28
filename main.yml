@@ -1,16 +1,49 @@
 ---
 - name: DNS Resolution Readiness Testing
-  hosts: localhost
-  gather_facts: no
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
   vars:
-    csv_file: "sample_dns_data2.csv"
-    csv_output_file: "test_results2.csv"
+    dns_results_dir: "/tmp/dns_results"
+    csv_input_file: "sample_dns_data2.csv"
+    csv_output_file_name: "test_results2.csv"
+    local_results_dir: "./results"
     test_results: []
 
+  pre_tasks:
+    # Create local results directory first (without sudo)
+    - name: Ensure local results directory exists
+      delegate_to: localhost
+      become: no
+      file:
+        path: "{{ local_results_dir }}"
+        state: directory
+        mode: '0755'
+      run_once: true
+
+    # Create output directory on target hosts
+    - name: Ensure output directory exists on target
+      file:
+        path: "{{ dns_results_dir }}"
+        state: directory
+        mode: '0755'
+      
+    # Copy required files to target hosts
+    - name: Copy CSV data file to target hosts
+      copy:
+        src: "{{ csv_input_file }}"
+        dest: "{{ dns_results_dir }}/{{ csv_input_file | basename }}"
+        mode: '0644'
+      
+    - name: Copy templates directory
+      copy:
+        src: templates/
+        dest: "{{ dns_results_dir }}/templates/"
+        mode: '0644'
+        
   tasks:
     - name: Read entire CSV file as lines
       ansible.builtin.slurp:
-        src: "{{ csv_file }}"
+        src: "{{ dns_results_dir }}/{{ csv_input_file | basename }}"
       register: csv_content
 
     - name: Parse CSV lines
@@ -56,13 +89,19 @@
       debug:
         msg: "{{ test_results }}"
 
-    - name: Write test results to CSV
+    - name: Write test results to CSV on target
       ansible.builtin.template:
-        src: templates/test_results_csv.j2
-        dest: "{{ csv_output_file }}"
+        src: "templates/test_results_csv.j2"  # Changed: Use local path
+        dest: "{{ dns_results_dir }}/{{ inventory_hostname }}_{{ csv_output_file_name }}"
         mode: '0644'
       vars:
         results: "{{ test_results }}"
         header_info:
           domain_suffix: "{{ domain_suffix }}"
           nameservers: "{{ nameservers | join(', ') }}"
+          
+    - name: Fetch results back to control node
+      fetch:
+        src: "{{ dns_results_dir }}/{{ inventory_hostname }}_{{ csv_output_file_name }}"
+        dest: "{{ local_results_dir }}/"
+        flat: yes
