@@ -33,7 +33,7 @@
       set_fact:
         host_ip: >-
           {% if host_file_check.rc == 0 %}
-          {{ host_file_check.stdout.split()[0] }}
+          {{ host_file_check.stdout.split()[0] | trim }}
           {% else %}
           None
           {% endif %}
@@ -53,7 +53,7 @@
       'Nameserver_Configured': 'None',
       'Resolve_IP': host_ip if domain_found else 'None',
       'Resolve_Status': 'TRUE' if domain_found else 'FALSE',
-      'IP_MATCHED': 'TRUE' if (domain_found and host_ip == domain_entry.IP_Mapping) else 'FALSE' if domain_found else 'None',
+      'IP_MATCHED': 'TRUE' if (domain_found and host_ip | trim == domain_entry.IP_Mapping | trim) else 'FALSE' if domain_found else 'None',
       'Log_returned': host_file_check.stdout if domain_found else ''}) }}"
   when: config_type == "Host file"
 
