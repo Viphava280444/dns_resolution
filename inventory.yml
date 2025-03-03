@@ -3,7 +3,6 @@
 testing_vms:
   hosts:
     vm1:
-<<<<<<< HEAD
       ansible_host: xxx
       ansible_user: xxx
       ansible_password: xxx
@@ -13,18 +12,7 @@ testing_vms:
       ansible_host: xxx
       ansible_user: xxx
       ansible_ssh_private_key_file: xxx to your private key file
-=======
-      ansible_host: 20.189.120.29
-      ansible_user: opsta1
-      ansible_password: Opsta1234567890
-      ansible_become: yes
-      
-    vm2:
-      ansible_host: 20.189.114.118
-      ansible_user: opsta2
-      ansible_ssh_private_key_file: /Users/khlaisuwan/Downloads/opsta_test.pem  # Path to your private key file
->>>>>>> 2e4580a1faa2d373ed586138485f00c7a467a340
-      ansible_become: yes
+
 
 # Variables that apply to all hosts
 all:
