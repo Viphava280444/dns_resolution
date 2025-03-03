@@ -3,15 +3,15 @@
 testing_vms:
   hosts:
     vm1:
-      ansible_host: xxxxx
-      ansible_user: xxxxx
-      ansible_password: xxxxx
+      ansible_host: 20.189.120.29
+      ansible_user: opsta1
+      ansible_password: Opsta1234567890
       ansible_become: yes
       
     vm2:
-      ansible_host: xxxxx
-      ansible_user: xxxxx
-      ansible_password: xxxxx
+      ansible_host: 20.189.114.118
+      ansible_user: opsta2
+      ansible_ssh_private_key_file: /Users/khlaisuwan/Downloads/opsta_test.pem  # Path to your private key file
       ansible_become: yes
 
 # Variables that apply to all hosts
