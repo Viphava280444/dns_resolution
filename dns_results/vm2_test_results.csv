@@ -1,0 +1,29 @@
+Domain:,.opsta.in.th,,,,,,,,,,
+Nameserver,"127.0.0.53 127.0.0.54",,,,,,,,,,
+Host,Service,IP Mapping,Domain name,Configuration,Description,Host Result,Nameserver Configured,Resolve IP,Resolve Status,IP MATCHED,Log returned
+"server1","TestHost1","192.168.119.130","cn310.opsta.in.th","Host file","","TRUE","None"," 192.168.119.130 ","TRUE","TRUE","192.168.119.130 cn310.opsta.in.th"
+"server2","TestHost2","192.168.119.135","cn320.opsta.in.th","Host file","","TRUE","None"," 192.168.119.131 ","TRUE","FALSE","192.168.119.131 cn320.opsta.in.th"
+"server3","TestHost3","192.168.119.131","cn400.opsta.in.th","Host file","","FALSE","None","None","FALSE","None",""
+"server4","TestHost4","10.0.0.139","testHost1.opsta.in.th","Host file","","FALSE","None","None","FALSE","None",""
+"server5","TestResolve1","34.133.233.173","argocd-ohm.opsta.in.th","Nameserver","","None","TRUE","    34.133.233.173","True","TRUE","Server:		127.0.0.54
+Address:	127.0.0.54#53
+
+Non-authoritative answer:
+Name:	argocd-ohm.opsta.in.th
+Address: 34.133.233.173"
+"server6","TestResolve2","142.250.190.78","cicd-ohm.opsta.in.th","Nameserver","","None","TRUE","    34.133.233.173","True","FALSE","Server:		127.0.0.54
+Address:	127.0.0.54#53
+
+Non-authoritative answer:
+Name:	cicd-ohm.opsta.in.th
+Address: 34.133.233.173"
+"server7","TestResolve3","9.8.7.6","test-resolve.opsta.in.th","Nameserver","","None","TRUE","  None
+","False","None","Server:		127.0.0.54
+Address:	127.0.0.54#53
+
+** server can't find test-resolve.opsta.in.th: NXDOMAIN"
+"server8","TestResolve4","9.8.7.6","googles.com","Nameserver","","None","TRUE","  None
+","False","None",";; communications error to 127.0.0.54#53: timed out
+;; communications error to 127.0.0.54#53: timed out
+;; communications error to 127.0.0.54#53: timed out
+;; no servers could be reached"

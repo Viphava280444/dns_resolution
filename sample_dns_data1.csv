@@ -1,5 +1,5 @@
 Domain:,.opsta.in.th,,,,
-Nameserver,127.0.0.53,,,,,
+Nameserver,"127.0.0.53 127.0.0.54",,,,
 Host,Service,IP Mapping,Domain name,Configuration,Description
 server1,TestHost1,192.168.119.130,cn310.opsta.in.th,Host file,
 server2,TestHost2,192.168.119.135,cn320.opsta.in.th,Host file,

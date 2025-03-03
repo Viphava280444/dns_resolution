@@ -48,7 +48,7 @@
       delegate_to: localhost
       become: no
       set_fact:
-        nameservers: "{{ csv_lines[1].split(',')[1] | replace('\"', '') | split(', ') }}"
+        nameservers: "{{ csv_lines[1].split(',')[1] | replace('\"', '') | split(' ') }}"
       when: csv_lines[1].startswith('Nameserver')
       run_once: true
 
@@ -120,4 +120,4 @@
         results: "{{ test_results }}"
         header_info:
           domain_suffix: "{{ domain_suffix }}"
-          nameservers: "{{ nameservers | join(', ') }}"
+          nameservers: "{{ nameservers | join(' ') }}"
