@@ -1,7 +1,7 @@
 ---
 - name: DNS Resolution Readiness Testing
   hosts: "{{ target_hosts | default('all') }}"
-  become: yes
+  become: no
   vars:
     # Core configuration variables - all can be set via command line
     csv_input_file: "{{ csv_data_file | default('sample_dns_data4.csv') }}"
