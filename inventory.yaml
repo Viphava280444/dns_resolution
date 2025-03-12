@@ -37,6 +37,6 @@ all:
                 dns_type: bind9
     vars:
         ansible_connection: ssh
-        ansible_password: xxxx
+        ansible_password: Opsta1234567890
         ansible_ssh_common_args: -o StrictHostKeyChecking=no
-        ansible_user: xxx
+        ansible_user: opsta
