@@ -1,0 +1,73 @@
+---
+# Initialize result variables
+- name: Initialize result variables
+  set_fact:
+    resolve_ip: "Unresolved"
+    resolve_status: "FALSE"
+    ip_matched: "Not Compared"
+    nslookup_stdout: ""
+
+- name: Perform DNS lookup using the configured nameserver
+  command: "nslookup {{ domain.Domain_name }}"
+  register: nslookup_result
+  ignore_errors: yes
+  changed_when: false
+
+- name: Extract nslookup output and check success
+  set_fact:
+    nslookup_stdout: "{{ nslookup_result.stdout | default('') }}"
+    resolve_status: "{{ 'TRUE' if 'Non-authoritative answer:' in (nslookup_result.stdout | default('')) else 'FALSE' }}"
+  when: nslookup_result is defined
+
+- name: Extract IP with grep (direct approach)
+  shell: "echo '{{ nslookup_stdout }}' | grep -oP 'Address:\\s+\\K[0-9.]+' | tail -1"
+  register: extracted_ip
+  ignore_errors: yes
+  changed_when: false
+  when: nslookup_stdout is defined and nslookup_stdout != ""
+
+- name: Set extracted IP
+  set_fact:
+    resolve_ip: "{{ extracted_ip.stdout | default('Unresolved') }}"
+  when: extracted_ip is defined and extracted_ip.stdout is defined and extracted_ip.stdout != ""
+
+- name: Compare IP with expected
+  set_fact:
+    ip_matched: "{{ 'TRUE' if resolve_ip == domain.IP_Mapping else 'FALSE' }}"
+  when: resolve_ip != "Unresolved"
+
+- name: Debug extraction results
+  debug:
+    msg:
+      - "Domain: {{ domain.Domain_name }}"
+      - "Output: {{ nslookup_stdout | default('Unresolved') }}"
+      - "Resolved Status: {{ resolve_status }}"
+      - "Extracted IP: {{ resolve_ip }}"
+      - "Expected IP: {{ domain.IP_Mapping }}"
+      - "IP Matched: {{ ip_matched }}"
+    verbosity: 1
+
+# Add result for nslookup check
+- name: Add nameserver result to results
+  set_fact:
+    host_test_results: >-
+      {{ 
+        host_test_results + [
+          {
+            'Host': domain.Host,
+            'Service': domain.Service,
+            'IP_Mapping': domain.IP_Mapping,
+            'Domain_name': domain.Domain_name,
+            'Configuration': domain.Configuration,
+            'Description': domain.Description,
+            'Host_Result': 'Not Applicable',
+            'Nameserver_Configured': nameserver_configured_value | default('Not Applicable'),
+            'Nameserver_Pattern': host_configuration_type | default('default'),
+            'Configured_NS': configured_nameservers | join(', '),
+            'Resolve_IP': resolve_ip,
+            'Resolve_Status': resolve_status,
+            'IP_MATCHED': ip_matched,
+            'Log_returned': nslookup_stdout | default('')
+          }
+        ] 
+      }}

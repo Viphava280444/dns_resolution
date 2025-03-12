@@ -12,7 +12,7 @@
       {% if host_file_check.rc == 0 %}
       {{ host_file_check.stdout.split()[0] | trim }}
       {% else %}
-      None
+      Not Applicable
       {% endif %}
     domain_found: "{{ host_file_check.rc == 0 }}"
 
@@ -29,10 +29,10 @@
             'Configuration': domain.Configuration,
             'Description': domain.Description,
             'Host_Result': 'TRUE' if domain_found else 'FALSE',
-            'Nameserver_Configured': 'None',
-            'Resolve_IP': host_ip if domain_found else 'None',
+            'Nameserver_Configured': 'Not Configured',
+            'Resolve_IP': host_ip if domain_found else 'Unresolved',
             'Resolve_Status': 'TRUE' if domain_found else 'FALSE',
-            'IP_MATCHED': 'TRUE' if (domain_found and host_ip | trim == domain.IP_Mapping | trim) else 'FALSE' if domain_found else 'None',
+            'IP_MATCHED': 'TRUE' if (domain_found and host_ip | trim == domain.IP_Mapping | trim) else 'FALSE' if domain_found else 'Not Compared',
             'Log_returned': host_file_check.stdout if domain_found else ''
           }
         ] 

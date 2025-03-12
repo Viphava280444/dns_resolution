@@ -1,0 +1,119 @@
+---
+# csv_to_inventory.yml - Convert CSV to Ansible inventory with nameserver pattern support
+- name: Create inventory from CSV file
+  hosts: localhost
+  gather_facts: no
+  vars:
+    csv_file: "{{ csv_input | default('inventory.csv') }}"
+    output_file: "{{ inventory_output | default('inventory.yaml') }}"
+    ssh_user: "{{ ssh_username | default('admin') }}"
+    
+    # Authentication method: 'key' or 'password'
+    auth_method: "{{ auth_type | default('key') }}"
+    ssh_key_path: "{{ ssh_key | default('/path/to/private_key') }}"
+    ssh_password: "{{ ssh_pass | default('your_password') }}"
+  
+  tasks:
+    - name: Validate authentication method
+      fail:
+        msg: "Invalid authentication method. Use auth_type=key or auth_type=password"
+      when: auth_method != 'key' and auth_method != 'password'
+      
+    - name: Read CSV file
+      community.general.read_csv:
+        path: "{{ csv_file }}"
+      register: csv_data
+      
+    - name: Initialize empty groups
+      set_fact:
+        host_file_group: {}
+        nameserver_group: {}
+        
+    - name: Process host entries for host_file group
+      set_fact:
+        host_file_group: "{{ host_file_group | combine({ 
+          item.Server: {
+            'ansible_host': item.IP,
+            'host_enabled': (item['Hosts file'] == 'TRUE'),
+            'nameserver_enabled': (item.Nameserver == 'TRUE'),
+            'configuration_type': item['Nameserver Pattern'] | default('default')
+          } }) }}"
+      loop: "{{ csv_data.list }}"
+      when: 
+        - item['Hosts file'] == 'TRUE'
+      
+    - name: Process entries for nameserver group
+      set_fact:
+        nameserver_group: "{{ nameserver_group | combine({ 
+          item.Server: {
+            'ansible_host': item.IP,
+            'host_enabled': (item['Hosts file'] == 'TRUE'),
+            'nameserver_enabled': (item.Nameserver == 'TRUE'),
+            'configuration_type': item['Nameserver Pattern'] | default('default')
+          } }) }}"
+      loop: "{{ csv_data.list }}"
+      when: 
+        - item.Nameserver == 'TRUE'
+      
+    - name: Set global authentication with SSH key
+      set_fact:
+        global_vars:
+          ansible_user: "{{ ssh_user }}"
+          ansible_ssh_private_key_file: "{{ ssh_key_path }}"
+          ansible_connection: ssh
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+      when: auth_method == 'key'
+      
+    - name: Set global authentication with password
+      set_fact:
+        global_vars:
+          ansible_user: "{{ ssh_user }}"
+          ansible_password: "{{ ssh_password }}"
+          ansible_connection: ssh
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+      when: auth_method == 'password'
+      
+    - name: Build final inventory structure
+      set_fact:
+        inventory:
+          all:
+            vars: "{{ global_vars }}"
+            children:
+              host_file:
+                vars:
+                  config_file: /etc/hosts
+                  backup_dir: /var/backups/hosts
+                hosts: "{{ host_file_group }}"
+              nameserver:
+                vars:
+                  dns_type: bind9
+                  config_dir: /etc/bind
+                hosts: "{{ nameserver_group }}"
+                
+    - name: Write inventory to YAML file
+      copy:
+        content: "{{ inventory | to_nice_yaml }}"
+        dest: "{{ output_file }}"
+        
+    - name: Show authentication information
+      debug:
+        msg: "Inventory created using {{ auth_method }} authentication with user {{ ssh_user }}"
+        
+    - name: Debug CSV column headers
+      debug:
+        msg: "CSV columns: {{ csv_data.list[0].keys() | list | join(', ') }}"
+        verbosity: 1
+      when: csv_data.list | length > 0
+      
+    - name: Show host_file group information
+      debug:
+        msg: "Added {{ host_file_group | length }} hosts to host_file group: {{ host_file_group.keys() | list | join(', ') }}"
+        
+    - name: Show nameserver group information
+      debug:
+        msg: "Added {{ nameserver_group | length }} hosts to nameserver group: {{ nameserver_group.keys() | list | join(', ') }}"
+        
+    - name: Show nameserver pattern assignments
+      debug:
+        var: nameserver_group
+      when: nameserver_group | length > 0

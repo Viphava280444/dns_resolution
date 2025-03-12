@@ -1,0 +1,9 @@
+Domain:,.opsta.in.th,,,,
+Service,IP Mapping,name,Domain name,Configuration,Description
+TestHost1,192.168.119.130,cn310,cn310.opsta.in.th,Host file,
+TestHost2,192.168.119.135,cn320,cn320.opsta.in.th,Host file,
+TestHost3,192.168.119.131,cn400,cn400.opsta.in.th,Host file,
+TestHost4,10.0.0.139,testHost1,testHost1.opsta.in.th,Host file,
+TestResolve1,34.133.233.173,argocd-ohm,argocd-ohm.opsta.in.th,Nameserver,
+TestResolve3,142.250.190.78,cicd-ohm,cicd-ohm.opsta.in.th,Nameserver,
+TestResolve5,9.8.7.6,test-resolve,test-resolve.opsta.in.th,Nameserver,

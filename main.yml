@@ -3,13 +3,66 @@
   hosts: "{{ target_hosts | default('all') }}"
   become: yes
   vars:
-    csv_input_file: "sample_dns_data2.csv"
-    local_results_dir: "./results"
+    # Core configuration variables - all can be set via command line
+    csv_input_file: "{{ csv_data_file | default('sample_dns_data4.csv') }}"
+    dns_patterns_file: "{{ patterns_file | default('DNS_pattern.csv') }}"
+    local_results_dir: "{{ results_dir | default('./results') }}"
+    fallback_nameservers: "{{ nameserver_list | default(['No nameserver']) | from_json if nameserver_list is string else nameserver_list | default(['No nameserver']) }}"
+    default_domain_suffix: "{{ domain_suffix | default('default.local') }}"
+    verbosity_level: "{{ debug_level | default(1) | int }}"
     test_results: []
-    nameservers: []
+    
+    # Report filenames - can be set via command line
+    server_summary_filename: "{{ summary_report_name | default('server_summary_report.csv') }}"
+    nameserver_config_filename: "{{ nameserver_report_name | default('nameserver_configuration_report.csv') }}"
+    
+    # Feature toggles - enable/disable specific functionality
+    enable_host_file_checks: "{{ host_file_checks | default(true) | bool }}"
+    enable_resolve_checks: "{{ resolve_checks | default(true) | bool }}"
+    enable_nslookup_checks: "{{ nslookup_checks | default(true) | bool }}"
+    skip_unreachable_hosts: "{{ skip_unreachable | default(false) | bool }}"
+    generate_summary_report: "{{ summary_report | default(true) | bool }}"
 
   pre_tasks:
-    # Create local results directory (without sudo)
+    - name: Display playbook configuration
+      debug:
+        msg:
+          - "Target hosts: {{ target_hosts | default('all') }}"
+          - "CSV data file: {{ csv_input_file }}"
+          - "DNS patterns file: {{ dns_patterns_file }}"
+          - "Results directory: {{ local_results_dir }}"
+          - "Server summary report: {{ server_summary_filename }}"
+          - "Nameserver config report: {{ nameserver_config_filename }}"
+          - "Fallback nameservers: {{ fallback_nameservers | join(', ') }}"
+          - "Default domain suffix: {{ default_domain_suffix }}"
+          - "Debug level: {{ verbosity_level }}"
+          - "Host file checks enabled: {{ enable_host_file_checks }}"
+          - "Resolve.conf checks enabled: {{ enable_resolve_checks }}"
+          - "NSLookup checks enabled: {{ enable_nslookup_checks }}"
+          - "Skip unreachable hosts: {{ skip_unreachable_hosts }}"
+          - "Generate summary report: {{ generate_summary_report }}"
+        verbosity: 1
+
+    - name: Set initial fallback nameservers
+      set_fact:
+        nameservers: "{{ fallback_nameservers }}"
+
+    - name: Check if host is in host_file group
+      set_fact:
+        is_host_file_server: "{{ inventory_hostname in groups['host_file'] | default([]) }}"
+
+    - name: Check if host is in nameserver group
+      set_fact:
+        is_nameserver: "{{ inventory_hostname in groups['nameserver'] | default([]) }}"
+
+    - name: Debug host group membership
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Is host file server: {{ is_host_file_server }}"
+          - "Is nameserver: {{ is_nameserver }}"
+        verbosity: "{{ verbosity_level }}"
+
     - name: Ensure local results directory exists
       delegate_to: localhost
       become: no
@@ -19,7 +72,60 @@
         mode: '0755'
       run_once: true
 
-    # Read CSV file locally
+    - name: Check if DNS patterns file exists
+      delegate_to: localhost
+      become: no
+      stat:
+        path: "{{ dns_patterns_file }}"
+      register: dns_patterns_stat
+      run_once: true
+
+    - name: Read DNS patterns CSV file
+      delegate_to: localhost
+      become: no
+      slurp:
+        src: "{{ dns_patterns_file }}"
+      register: patterns_content
+      run_once: true
+      when: dns_patterns_stat.stat.exists
+
+    - name: Parse DNS patterns CSV
+      delegate_to: localhost
+      become: no
+      set_fact:
+        patterns_lines: "{{ patterns_content.content | b64decode | split('\n') | reject('equalto', '') | list }}"
+      run_once: true
+      when: dns_patterns_stat.stat.exists
+
+    - name: Extract pattern headers
+      delegate_to: localhost
+      become: no
+      set_fact:
+        pattern_types: "{{ patterns_lines[0].split(',') }}"
+      run_once: true
+      when: dns_patterns_stat.stat.exists
+
+    - name: Initialize DNS patterns dictionary
+      delegate_to: localhost
+      become: no
+      set_fact:
+        dns_patterns: {}
+      run_once: true
+      when: dns_patterns_stat.stat.exists
+
+    - name: Process DNS patterns for each nameserver type
+      delegate_to: localhost
+      become: no
+      set_fact:
+        dns_patterns: "{{ dns_patterns | combine({ pattern_types[idx]: pattern_ips }) }}"
+      vars:
+        pattern_ips: "{{ patterns_lines[1:] | map('split', ',') | map('list') | map(attribute=idx) | list }}"
+      loop: "{{ range(0, pattern_types | length) | list }}"
+      loop_control:
+        index_var: idx
+      run_once: true
+      when: dns_patterns_stat.stat.exists
+
     - name: Read CSV file contents
       delegate_to: localhost
       become: no
@@ -28,7 +134,6 @@
       register: csv_content
       run_once: true
 
-    # Process CSV data locally
     - name: Parse CSV lines
       delegate_to: localhost
       become: no
@@ -36,32 +141,99 @@
         csv_lines: "{{ csv_content.content | b64decode | split('\n') | reject('equalto', '') | list }}"
       run_once: true
 
-    - name: Extract domain suffix
+    - name: Initialize domain suffix with default value
       delegate_to: localhost
       become: no
       set_fact:
-        domain_suffix: "{{ csv_lines[0].split(',')[1] }}"
+        controller_domain_suffix: "{{ default_domain_suffix }}"
+      run_once: true
+
+    - name: Extract domain suffix if available
+      delegate_to: localhost
+      become: no
+      set_fact:
+        controller_domain_suffix: "{{ csv_lines[0].split(',')[1] }}"
       when: csv_lines[0].startswith('Domain:')
       run_once: true
 
-    - name: Extract nameservers
+    - name: Try to extract nameservers from CSV
       delegate_to: localhost
       become: no
       set_fact:
-        nameservers: "{{ csv_lines[1].split(',')[1] | replace('\"', '') | split(' ') }}"
-      when: csv_lines[1].startswith('Nameserver')
+        controller_nameservers: "{{ csv_lines[1].split(',')[1] | replace('\"', '') | split(' ') }}"
+      when: csv_lines | length > 1 and csv_lines[1].startswith('Nameserver')
+      run_once: true
+      ignore_errors: yes
+
+    - name: Check if CSV starts with header row
+      delegate_to: localhost
+      become: no
+      set_fact:
+        has_header: "{{ csv_lines[0].startswith('Host,') or csv_lines[0].startswith('Service,') }}"
       run_once: true
 
-    - name: Convert remaining lines to CSV data
+    - name: Convert CSV data without metadata
       delegate_to: localhost
       become: no
       set_fact:
-        csv_data: "{{ csv_lines[3:] | map('split', ',') | list }}"
-      when: csv_lines[2].startswith('Host')
+        csv_data: "{{ (csv_lines | map('split', ',') | list)[1:] if has_header else (csv_lines | map('split', ',') | list) }}"
       run_once: true
-      
+
+    - name: Set domain suffix on all hosts
+      set_fact:
+        domain_suffix: "{{ controller_domain_suffix }}"
+
+    - name: Set extracted nameservers on all hosts if available
+      set_fact:
+        nameservers: "{{ controller_nameservers | default(fallback_nameservers) }}"
+      when: controller_nameservers is defined
+      ignore_errors: yes
+
+    - name: Debug CSV parsing
+      debug:
+        msg:
+          - "Domain suffix: {{ domain_suffix }}"
+          - "Nameservers: {{ nameservers | join(', ') }}"
+          - "CSV has header: {{ has_header | default(false) }}"
+          - "First data row: {{ csv_data[0] if csv_data|length > 0 else 'No data' }}"
+        verbosity: "{{ verbosity_level }}"
+
   tasks:
-    # Process each domain entry - executed per host
+    - name: Get host-specific configuration type from inventory
+      set_fact:
+        host_configuration_type: "{{ configuration_type | default('default') }}"
+
+    - name: Read resolve.conf file
+      slurp:
+        src: /etc/resolv.conf
+      register: resolv_conf_content
+      ignore_errors: yes
+
+    - name: Debug host information
+      debug:
+        msg: "Host: {{ inventory_hostname }}, Configuration Type: {{ host_configuration_type }}"
+        verbosity: "{{ verbosity_level }}"
+
+    - name: Check if pattern exists in DNS patterns dictionary
+      set_fact:
+        pattern_exists: "{{ host_configuration_type in dns_patterns }}"
+      when: dns_patterns is defined
+
+    - name: Set nameservers from pattern if it exists
+      set_fact:
+        nameservers: "{{ dns_patterns[host_configuration_type] }}"
+      when:
+        - dns_patterns is defined
+        - pattern_exists | default(false)
+
+    - name: Debug selected nameservers
+      debug:
+        msg:
+          - "Using nameservers: {{ nameservers | join(', ') }}"
+          - "Configuration type: {{ host_configuration_type }}"
+          - "Pattern exists: {{ pattern_exists | default(false) }}"
+        verbosity: "{{ verbosity_level }}"
+
     - name: Setup domain fact
       set_fact:
         host_test_results: []
@@ -73,42 +245,53 @@
         loop_var: domain_raw
       vars:
         domain:
-          Host: "{{ domain_raw[0] }}"
-          Service: "{{ domain_raw[1] }}"
-          IP_Mapping: "{{ domain_raw[2] }}"
-          Domain_name: "{{ domain_raw[3] }}"
-          Configuration: "{{ domain_raw[4] }}"
-          Description: "{{ domain_raw[5] if domain_raw | length > 5 else '' }}"
-      when: domain_raw[4] == "Host file"
-      
+          Service: "{{ domain_raw[0] | trim }}"
+          IP_Mapping: "{{ domain_raw[1] | trim }}"
+          Host: "{{ domain_raw[2] | trim }}"
+          Domain_name: "{{ domain_raw[3] | trim }}"
+          Configuration: "{{ domain_raw[4] | trim }}"
+          Description: "{{ domain_raw[5] | trim if domain_raw | length > 5 else '' }}"
+      when:
+        - domain_raw | length > 4
+        - domain_raw[4] | trim == "Host file"
+        - is_host_file_server | bool
+        - enable_host_file_checks | bool
+
+    # Process nameserver checks for each domain entry
     - name: Process each domain entry for nameservers
-      include_tasks: check_nameserver.yml
+      include_tasks: process_nameserver_checks.yml
       loop: "{{ csv_data }}"
       loop_control:
         loop_var: domain_raw
       vars:
         domain:
-          Host: "{{ domain_raw[0] }}"
-          Service: "{{ domain_raw[1] }}"
-          IP_Mapping: "{{ domain_raw[2] }}"
-          Domain_name: "{{ domain_raw[3] }}"
-          Configuration: "{{ domain_raw[4] }}"
-          Description: "{{ domain_raw[5] if domain_raw | length > 5 else '' }}"
-      when: domain_raw[4] == "Nameserver"
+          Service: "{{ domain_raw[0] | trim }}"
+          IP_Mapping: "{{ domain_raw[1] | trim }}"
+          Host: "{{ domain_raw[2] | trim }}"
+          Domain_name: "{{ domain_raw[3] | trim }}"
+          Configuration: "{{ domain_raw[4] | trim }}"
+          Description: "{{ domain_raw[5] | trim if domain_raw | length > 5 else '' }}"
+      when:
+        - domain_raw | length > 4
+        - domain_raw[4] | trim == "Nameserver"
+        - is_nameserver | bool
 
-    # Get results from each host
+    - name: Debug host test results before final assignment
+      debug:
+        msg: "Host {{ inventory_hostname }} test results: {{ host_test_results }}"
+        verbosity: "{{ verbosity_level }}"
+
     - name: Add host results to main results
       set_fact:
         test_results: "{{ host_test_results }}"
-    
+
     - name: Copy results to controller
       delegate_to: localhost
       become: no
       set_fact:
         all_results: "{{ (all_results | default({})) | combine({inventory_hostname: test_results}) }}"
       run_once: false
-      
-    # Generate CSV results locally
+
     - name: Write test results to CSV on controller
       delegate_to: localhost
       become: no
@@ -121,3 +304,128 @@
         header_info:
           domain_suffix: "{{ domain_suffix }}"
           nameservers: "{{ nameservers | join(' ') }}"
+
+  post_tasks:
+    - name: Set fact for collecting all results
+      delegate_to: localhost
+      become: no
+      set_fact:
+        all_host_results: "{{ all_host_results | default({}) | combine({inventory_hostname: test_results}) }}"
+      run_once: false
+
+    - name: Debug all_host_results after setting
+      delegate_to: localhost
+      become: no
+      debug:
+        var: all_host_results
+        verbosity: "{{ verbosity_level }}"
+      run_once: false
+
+    - name: Generate server-level summary report
+      delegate_to: localhost
+      become: no
+      run_once: true
+      when: generate_summary_report | bool
+      block:
+        - name: Initialize server summary array
+          set_fact:
+            server_summary: []
+            
+        - name: Debug available results
+          debug:
+            var: all_results
+            verbosity: "{{ verbosity_level }}"
+        
+        - name: Test basic loop with default item variable
+          debug:
+            msg: "Current host: {{ item }}"
+            verbosity: "{{ verbosity_level }}"
+          loop: "{{ groups['all'] }}"
+          
+        - name: Calculate result for each inventory host
+          set_fact:
+            server_summary: >-
+              {{ server_summary + [
+                {
+                  'Server': host_name,
+                  'IP_server': hostvars[host_name]['ansible_host'] | default('Unknown'),
+                  'Total_Services': total_services,
+                  'Resolve_True_Count': resolve_true_count,
+                  'IP_Match_True_Count': ip_match_true_count,
+                  'All_Resolve_Status': all_resolve_status,
+                  'All_IP_MATCHED': all_ip_matched
+                }
+              ] }}
+          vars:
+            # Access test_results directly from the host variables
+            results: "{{ hostvars[host_name]['test_results'] | default([]) }}"
+            total_services: "{{ results | length | int }}"
+            resolve_true_count: "{{ results | selectattr('Resolve_Status', 'in', ['TRUE', true]) | list | length | int }}"
+            ip_match_true_count: "{{ results | selectattr('IP_MATCHED', 'in', ['TRUE', true]) | list | length | int }}"
+            all_resolve_status: "{{ 'TRUE' if (resolve_true_count|int == total_services|int and total_services|int > 0) else 'FALSE' }}"
+            all_ip_matched: "{{ 'TRUE' if (ip_match_true_count|int == total_services|int and total_services|int > 0) else 'FALSE' }}"
+          loop: "{{ groups['all'] }}"
+          loop_control:
+            loop_var: host_name
+
+        - name: Write server summary report to CSV
+          copy:
+            content: |
+              Server,IP Server,Total Services,Resolve True Count,IP Match True Count,All Resolve Status,All IP MATCHED
+              {% for result in server_summary %}
+              {{ result.Server }},{{ result.IP_server }},{{ result.Total_Services }},{{ result.Resolve_True_Count }},{{ result.IP_Match_True_Count }},{{ result.All_Resolve_Status }},{{ result.All_IP_MATCHED }}
+              {% endfor %}
+            dest: "{{ local_results_dir }}/{{ server_summary_filename }}"
+            mode: '0644'
+
+        - name: Display server summary report
+          debug:
+            msg: "Server Summary Report has been generated at {{ local_results_dir }}/{{ server_summary_filename }}"
+            verbosity: 0
+
+    - name: Generate nameserver configuration report
+      delegate_to: localhost
+      become: no
+      run_once: true
+      block:
+        - name: Initialize nameserver results array
+          set_fact:
+            all_nameserver_results: []
+        
+        - name: Get the actual nameserver information from each host's test results
+          set_fact:
+            all_nameserver_results: >-
+              {{ all_nameserver_results + [
+                {
+                  'Server': host_name,
+                  'IP_server': hostvars[host_name]['ansible_host'] | default('Unknown'),
+                  'Nameservers': 'Not Applicable' if (not enable_resolve_checks | bool) else (
+                    'TRUE' if (
+                      hostvars[host_name]['test_results'] is defined and
+                      hostvars[host_name]['test_results'] | 
+                      selectattr('Nameserver_Configured', 'defined') | 
+                      selectattr('Nameserver_Configured', 'equalto', true) |
+                      list | length > 0
+                    ) else 'FALSE'
+                  )
+                }
+              ] }}
+          loop: "{{ groups['all'] }}"
+          loop_control:
+            loop_var: host_name
+            label: "{{ host_name }}"
+          
+        - name: Write nameserver configuration report to CSV
+          copy:
+            content: |
+              Server,IP Server,Nameserver configured
+              {% for result in all_nameserver_results %}
+              {{ result.Server }},{{ result.IP_server }},{{ result.Nameservers }}
+              {% endfor %}
+            dest: "{{ local_results_dir }}/{{ nameserver_config_filename }}"
+            mode: '0644'
+
+        - name: Display nameserver configuration report
+          debug:
+            msg: "Nameserver Configuration Report has been generated at {{ local_results_dir }}/{{ nameserver_config_filename }}"
+            verbosity: 0

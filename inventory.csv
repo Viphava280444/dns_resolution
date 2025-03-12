@@ -1,0 +1,4 @@
+Server,IP,Hosts file,Nameserver,Nameserver Pattern
+Opsta1,20.189.73.213,TRUE,TRUE,Nameserver_p1
+Opsta2,40.81.28.32,TRUE,TRUE,Nameserver_p2
+Opsta3,20.189.122.186,FALSE,TRUE,Nameserver_p3

@@ -1,0 +1,27 @@
+---
+# Check nameserver configuration (matches ANY of the pattern's nameservers)
+- name: Check nameserver configuration
+  command: grep "nameserver {{ item }}" /etc/resolv.conf
+  register: resolv_conf_check
+  ignore_errors: yes
+  changed_when: false
+  loop: "{{ nameservers }}"
+
+- name: Calculate nameserver configuration status
+  set_fact:
+    nameserver_configured: "{{ ((resolv_conf_check.results | map(attribute='rc') | list | max == 0) 
+                             and (resolv_conf_check.results | length == nameservers | length)) | string }}"
+    configured_nameservers: "{{ resolv_conf_check.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+
+- name: Calculate missing nameservers
+  set_fact:
+    missing_nameservers: "{{ nameservers | difference(configured_nameservers) }}"
+
+# Debug all variables
+- name: Debug nameserver info
+  debug:
+    msg: 
+      - "Nameserver configured: {{ nameserver_configured }}"
+      - "Configured nameservers: {{ configured_nameservers | join(', ') }}"
+      - "Missing nameservers: {{ missing_nameservers | join(', ') }}"
+    verbosity: 1

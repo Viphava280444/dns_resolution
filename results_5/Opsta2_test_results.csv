@@ -1,0 +1,17 @@
+Domain:,.opsta.in.th,,,,,,,,,,
+Nameserver,"127.0.0.54  ",,,,,,,,,,
+Service,IP Mapping,Host,Domain name,Configuration,Description,Host Result,Nameserver Configured,Resolve IP,Resolve Status,IP MATCHED,Log returned
+"TestHost1","192.168.119.130","cn310","cn310.opsta.in.th","Host file","","TRUE","Not Configured"," 192.168.119.130 ","TRUE","TRUE","192.168.119.130 cn310.opsta.in.th"
+"TestHost2","192.168.119.131","cn320","cn320.opsta.in.th","Host file","","TRUE","Not Configured"," 192.168.119.131 ","TRUE","TRUE","192.168.119.131 cn320.opsta.in.th"
+"TestResolve1","34.133.233.173","argocd-ohm","argocd-ohm.opsta.in.th","Nameserver","","Not Applicable","True","34.133.233.173","True","True","Server:		127.0.0.54
+Address:	127.0.0.54#53
+
+Non-authoritative answer:
+Name:	argocd-ohm.opsta.in.th
+Address: 34.133.233.173"
+"TestResolve3","34.133.233.173","cicd-ohm","cicd-ohm.opsta.in.th","Nameserver","","Not Applicable","True","34.133.233.173","True","True","Server:		127.0.0.54
+Address:	127.0.0.54#53
+
+Non-authoritative answer:
+Name:	cicd-ohm.opsta.in.th
+Address: 34.133.233.173"

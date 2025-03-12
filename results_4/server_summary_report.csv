@@ -1,0 +1,4 @@
+Server,IP Server,Total Services,Resolve True Count,IP Match True Count,All Resolve Status,All IP MATCHED
+Opsta1,20.189.73.213,3,2,1,FALSE,FALSE
+Opsta2,40.81.28.32,3,2,1,FALSE,FALSE
+Opsta3,20.189.122.186,3,0,0,FALSE,FALSE

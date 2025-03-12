@@ -1,0 +1,6 @@
+Domain:,.opsta.in.th,,,,,,,,,,
+Nameserver,"No nameserver",,,,,,,,,,
+Service,IP Mapping,Host,Domain name,Configuration,Description,Host Result,Nameserver Configured,Resolve IP,Resolve Status,IP MATCHED,Log returned
+"TestResolve1","34.133.233.173","argocd-ohm","argocd-ohm.opsta.in.th","Nameserver","","Not Applicable","False","Unresolved","FALSE","Not Compared","Not all required nameservers are configured. Missing: {{ missing_nameservers | default(["all"]) | join(", ") }}"
+"TestResolve3","142.250.190.78","cicd-ohm","cicd-ohm.opsta.in.th","Nameserver","","Not Applicable","False","Unresolved","FALSE","Not Compared","Not all required nameservers are configured. Missing: {{ missing_nameservers | default(["all"]) | join(", ") }}"
+"TestResolve5","9.8.7.6","test-resolve","test-resolve.opsta.in.th","Nameserver","","Not Applicable","False","Unresolved","FALSE","Not Compared","Not all required nameservers are configured. Missing: {{ missing_nameservers | default(["all"]) | join(", ") }}"

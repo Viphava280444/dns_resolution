@@ -1,0 +1,68 @@
+---
+# This file handles the two-step process of checking nameserver configuration
+# and then conditionally performing nslookup only if nameservers are configured
+
+# Initialize host_test_results if not defined
+- name: Initialize host_test_results
+  set_fact:
+    host_test_results: []
+  when: host_test_results is not defined
+
+# Step 1: Check nameserver configuration in resolv.conf when enabled
+- name: Include check_resolve.yml to verify nameserver configuration
+  include_tasks: check_resolve.yml
+  when: enable_resolve_checks | bool
+
+# Set default values for disabled resolve checks
+- name: Set default values when resolve checks are disabled
+  set_fact:
+    nameserver_configured_value: "Not Applicable"
+    configured_nameservers: "{{ nameservers }}"
+    missing_nameservers: []
+  when: not enable_resolve_checks | bool
+
+# Map nameserver_configured to nameserver_configured_value when resolve checks enabled
+- name: Set status when resolve checks are enabled
+  set_fact:
+    nameserver_configured_value: "{{ nameserver_configured | upper }}"
+  when: 
+    - enable_resolve_checks | bool 
+    - nameserver_configured is defined
+
+# Step 2: Perform nslookup checks based on configuration
+- name: Execute nslookup checks
+  include_tasks: check_nslookup.yml
+  when: 
+    - enable_nslookup_checks | bool
+    - (not enable_resolve_checks | bool) or (enable_resolve_checks | bool and nameserver_configured | default('false') | lower == "true")
+
+# Add result for skipped checks (when needed)
+- name: Add result for skipped checks
+  set_fact:
+    host_test_results: >-
+      {{ 
+        host_test_results + [
+          {
+            'Host': domain.Host,
+            'Service': domain.Service,
+            'IP_Mapping': domain.IP_Mapping,
+            'Domain_name': domain.Domain_name,
+            'Configuration': domain.Configuration,
+            'Description': domain.Description,
+            'Host_Result': 'Not Applicable',
+            'Nameserver_Configured': nameserver_configured_value | default('Not Applicable'),
+            'Nameserver_Pattern': host_configuration_type | default('default'),
+            'Configured_NS': configured_nameservers | default(['Not Configured']) | join(', '),
+            'Resolve_IP': 'Not Applicable' if not enable_nslookup_checks | bool else 'Unresolved',
+            'Resolve_Status': 'Not Applicable' if not enable_nslookup_checks | bool else 'FALSE',
+            'IP_MATCHED': 'Not Applicable' if not enable_nslookup_checks | bool else 'Not Compared',
+            'Log_returned': (
+              'All DNS resolution checks are disabled' if not enable_resolve_checks | bool and not enable_nslookup_checks | bool
+              else 'NSLookup checks disabled' if not enable_nslookup_checks | bool
+              else 'Resolve.conf checks disabled' if not enable_resolve_checks | bool
+              else 'Not all required nameservers are configured. Missing: {{ missing_nameservers | default(["all"]) | join(", ") }}'
+            )
+          }
+        ] 
+      }}
+  when: enable_resolve_checks | bool and (not enable_nslookup_checks | bool or nameserver_configured | default('false') | lower == "false")

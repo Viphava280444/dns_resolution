@@ -1,0 +1,7 @@
+Domain:,.opsta.in.th,,,,,,,,,,
+Nameserver,"127.0.0.53 127.0.0.54 ",,,,,,,,,,
+Service,IP Mapping,Host,Domain name,Configuration,Description,Host Result,Nameserver Configured,Resolve IP,Resolve Status,IP MATCHED,Log returned
+"TestHost1","192.168.119.130","cn310","cn310.opsta.in.th","Host file","","TRUE","Not Configured"," 192.168.119.130 ","TRUE","TRUE","192.168.119.130 cn310.opsta.in.th"
+"TestHost2","192.168.119.135","cn320","cn320.opsta.in.th","Host file","","TRUE","Not Configured"," 192.168.119.131 ","TRUE","FALSE","192.168.119.131 cn320.opsta.in.th"
+"TestHost3","192.168.119.131","cn400","cn400.opsta.in.th","Host file","","FALSE","Not Configured","Unresolved","FALSE","Not Compared",""
+"TestHost4","10.0.0.139","testHost1","testHost1.opsta.in.th","Host file","","FALSE","Not Configured","Unresolved","FALSE","Not Compared",""
